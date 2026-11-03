@@ -1,22 +1,50 @@
 """
-Configuration for DSNU / PRNU Correction (prnu_dsnu.py).
+Configuration for Demosaicing (demosiac.py) and DSNU / PRNU Correction (prnu_dsnu.py).
 One dict per payload (ALPHA / BRAVO), looked up by satellite_name.
 """
 
 # Global / shared parameters
 ADC_BIT_DEPTH = 14
-SATURATION_DN = 16380
+SATURATION_DN = 16383
 OUTPUT_DN_MAX = (2 ** ADC_BIT_DEPTH) - 1   # 16383
 OUTPUT_DTYPE = "uint16"
 
-BLOCK_ROWS = 32
-WORKERS = 4
-RAM_MARGIN_BYTES = 2 * 1024 ** 3
+BLOCK_ROWS = 512                   # rows read / corrected at a time in prnu_dsnu.py
 
 BAND_IDS = {"R": 0, "G": 1, "B": 2}
 BANDS = ("R", "G", "B")
 
 RADIANCE_UNIT = "mW/cm2/sr/um"
+
+TIFF_EXT = (".tif", ".tiff")
+
+# Demosaicing (demosiac.py)
+BAYER_PATTERN = "RGGB"             # sensor CFA order of the top-left 2x2 (same sensor on both payloads)
+DEMOSAIC_ALGORITHM = "ea"          # "ea" = OpenCV edge-aware, "bilinear" = plain bilinear
+DEMOSAIC_BORDER_FIX = False        # replicate inner pixels into the outer DEMOSAIC_BORDER_PX ring
+DEMOSAIC_BORDER_PX = 2
+DEMOSAIC_FLOAT_SCALE = None        # float input x scale -> uint16; None => 65535 if max <= 1.0, else 1.0
+DEMOSAIC_DIR_PREFIX = "demosaiced_rgb_cv2_"   # output: <input>/<prefix><algorithm>
+CV2_INPUT_MAX = 65535              # cv2 Bayer conversion takes uint8 / uint16 only
+
+# OpenCV names Bayer patterns from a different starting pixel than the usual
+# sensor convention, so the names look "wrong": an RGGB sensor is BayerBG in OpenCV.
+# Values are cv2 attribute names (cv2.COLOR_...).
+DEMOSAIC_CV2_CODES = {
+    "ea": {
+        "RGGB"          : "COLOR_BayerBG2RGB_EA",
+        "BGGR"          : "COLOR_BayerRG2RGB_EA",
+        "GRBG"          : "COLOR_BayerGB2RGB_EA",
+        "GBRG"          : "COLOR_BayerGR2RGB_EA",
+    },
+    "bilinear": {
+        "RGGB"          : "COLOR_BayerBG2RGB",
+        "BGGR"          : "COLOR_BayerRG2RGB",
+        "GRBG"          : "COLOR_BayerGB2RGB",
+        "GBRG"          : "COLOR_BayerGR2RGB",
+    },
+}
+BAYER_PATTERNS = ("RGGB", "BGGR", "GRBG", "GBRG")
 
 # ALPHA payload
 ALPHA = {
@@ -40,9 +68,9 @@ ALPHA = {
     },
 
     "saturation_radiance": {
-        "R"             : 152.34,
-        "G"             : 51.70,
-        "B"             : 71.19,
+        "R"             : 40.5088,
+        "G"             : 13.9273,
+        "B"             : 19.3128,
     },
 }
 
@@ -68,9 +96,9 @@ BRAVO = {
     },
 
     "saturation_radiance": {
-        "R"                     : 185.2881,
-        "G"                     : 66.4324,
-        "B"                     : 96.18,
+        "R"                     : 49.7373,
+        "G"                     : 17.1794,
+        "B"                     : 26.6689,
     },
 }
 
