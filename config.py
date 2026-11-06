@@ -32,19 +32,29 @@ CV2_INPUT_MAX = 65535              # cv2 Bayer conversion takes uint8 / uint16 o
 # Values are cv2 attribute names (cv2.COLOR_...).
 DEMOSAIC_CV2_CODES = {
     "ea": {
-        "RGGB"          : "COLOR_BayerBG2RGB_EA",
-        "BGGR"          : "COLOR_BayerRG2RGB_EA",
-        "GRBG"          : "COLOR_BayerGB2RGB_EA",
-        "GBRG"          : "COLOR_BayerGR2RGB_EA",
-    },
-    "bilinear": {
-        "RGGB"          : "COLOR_BayerBG2RGB",
-        "BGGR"          : "COLOR_BayerRG2RGB",
-        "GRBG"          : "COLOR_BayerGB2RGB",
-        "GBRG"          : "COLOR_BayerGR2RGB",
-    },
+        "RGGB"          : "COLOR_BayerBG2RGB_EA"
+    }
 }
-BAYER_PATTERNS = ("RGGB", "BGGR", "GRBG", "GBRG")
+BAYER_PATTERNS = ("RGGB")
+
+# Missing line correction (bayer_missing_line_correction.py)
+# Dropped scanlines (all-zero rows from packet loss) in raw Bayer frames, uses BAYER_PATTERN
+MLC_MAX_BURST_LINES = 3            # bursts <= this are restored, longer bursts are left as 0s
+MLC_MAX_LOSS_PCT = 10.0            # reject the image if more than this % of rows is lost
+MLC_GREEN_MODE = "all_green"       # "all_green" (Gr & Gb combined) or "same_channel" (Gr <- Gr, Gb <- Gb)
+MLC_ZERO_THRESHOLD = 0.0           # row is dropped if all its pixels are <= this
+MLC_CASCADE_GREEN = True           # restored green rows feed the next rows of the same burst
+MLC_DIR_NAME = "restored_bayer"    # output: <input>/<MLC_DIR_NAME>
+MLC_GREEN_MODES = ("all_green", "same_channel")
+
+# H5 Bayer extraction (h5_bayer_extraction.py)
+# L0 RAW HDF5 -> single-channel Bayer TIFF (input of the modules above)
+H5_IMAGE_DATASET = "Payload/Image"              # 2D raw Bayer frame (DN)
+H5_MASK_DATASET = "Payload/MissingPixelMask"    # 1 = pixel lost in transmission
+H5_PAYLOAD_GROUP = "Payload"                    # holds BayerPattern / BitsPerPixel / PayloadName attrs
+H5_SAVE_MASK = True                # also write the mask TIFF when any pixel is flagged lost
+H5_DIR_NAME = "bayer_from_h5"      # output: <input>/<H5_DIR_NAME>
+H5_MASK_DIR_NAME = "missing_pixel_mask"   # mask output: <output>/<H5_MASK_DIR_NAME>/<name>_mask.tif
 
 # ALPHA payload
 ALPHA = {
@@ -54,17 +64,17 @@ ALPHA = {
     "sensor_height"     : 9564,
     "usable_window"     : None,   # None => full sensor frame
 
-    "dark_frame_path"   : "/media/tarun/DC7A70CB7A70A3C4/flat_fields/alpha/@1562/darkframes_average.tiff",
+    "dark_frame_path"   : "/home/tarun/Desktop/darkframes_average.tiff",
 
     "gain_path": {
-        "R"             : "/media/tarun/DC7A70CB7A70A3C4/flat_fields/alpha/@1562/A_Red/Without_Filter_Flat_Fields/Flat_Field_Plots/Channel_R_gain.tif",
-        "G"             : "/media/tarun/DC7A70CB7A70A3C4/flat_fields/alpha/@1562/A_Green/Without_Filter_Flat_Fields/Flat_Field_Plots/Channel_G_gain.tif",
-        "B"             : "/media/tarun/DC7A70CB7A70A3C4/flat_fields/alpha/@1562/A_Blue/Without_Filter_Flat_Fields/Flat_Field_Plots/Channel_B_gain.tif",
+        "R"             : "/home/tarun/Desktop/Channel_R_gain.tif",
+        "G"             : "/home/tarun/Desktop/Channel_G_gain.tif",
+        "B"             : "/home/tarun/Desktop/Channel_B_gain.tif",
     },
     "offset_path": {
-        "R"             : "/media/tarun/DC7A70CB7A70A3C4/flat_fields/alpha/@1562/A_Red/Without_Filter_Flat_Fields/Flat_Field_Plots/Channel_R_offset.tif",
-        "G"             : "/media/tarun/DC7A70CB7A70A3C4/flat_fields/alpha/@1562/A_Green/Without_Filter_Flat_Fields/Flat_Field_Plots/Channel_G_offset.tif",
-        "B"             : "/media/tarun/DC7A70CB7A70A3C4/flat_fields/alpha/@1562/A_Blue/Without_Filter_Flat_Fields/Flat_Field_Plots/Channel_B_offset.tif",
+        "R"             : "/home/tarun/Desktop/Channel_R_offset.tif",
+        "G"             : "/home/tarun/Desktop/Channel_G_offset.tif",
+        "B"             : "/home/tarun/Desktop/Channel_B_offset.tif",
     },
 
     "saturation_radiance": {

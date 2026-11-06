@@ -1,22 +1,20 @@
 '''
-Demosaicing of Bayer TIFF images (single-channel raw DN) with OpenCV:
+Demosaicing of one Bayer TIFF image (single-channel raw DN) with OpenCV:
     Default method is OpenCV's Edge-Aware (EA) demosaicing, which interpolates along edges
     instead of across them (less zipper / color fringing than bilinear).
     Works on uint8 and uint16 data; float input (e.g. averaged frames) is converted to uint16 first.
-Output: <OUTPUT_FOLDER>/<name>.tif   (RGB, H x W x 3, same dtype as the cv2 input)
-        OUTPUT_FOLDER defaults to <INPUT_FOLDER>/demosaiced_rgb_cv2_<algorithm>,
-        which is the INPUT_FOLDER of prnu_dsnu.py.
+Output: <folder of the Bayer TIFF>/demosaiced_rgb_cv2_<algorithm>/<name>.tif
+        (RGB, H x W x 3, same dtype as the cv2 input). The output TIFF is the input of prnu_dsnu.py.
 
 Usage:
-    python3 demosiac.py                    (PAYLOAD, INPUT_FOLDER below, settings from config.py)
-    python3 demosiac.py --payload ALPHA --algorithm bilinear
+    python3 demosiac.py
+    -> asks for the payload and the input Bayer TIFF (other settings from config.py)
 '''
 
 import os
 import json
 import time
 import logging
-import argparse
 
 import cv2
 import numpy as np
@@ -25,16 +23,12 @@ import tifffile
 import config
 
 
-PAYLOAD = "BRAVO"
-INPUT_FOLDER = "/home/tarun/Documents/oct_8/bravo/@2000_averaged"
-OUTPUT_FOLDER = None   # None => <INPUT_FOLDER>/demosaiced_rgb_cv2_<algorithm>
-
 logger = logging.getLogger(__name__)
 
 
 class Demosaic:
     '''
-    Demosaics the Bayer images of one payload to RGB.
+    Demosaics a Bayer image of one payload to RGB.
     '''
 
     def __init__(self, satellite_name, algorithm=None, pattern=None, float_scale=None,
@@ -146,75 +140,37 @@ class Demosaic:
         return output_path
 
     # ------------------------------------------------------------------
-    @staticmethod
-    def list_images(input_path):
-        if os.path.isdir(input_path):
-            return sorted(os.path.join(input_path, f) for f in os.listdir(input_path)
-                          if f.lower().endswith(config.TIFF_EXT)
-                          and os.path.isfile(os.path.join(input_path, f)))
-        if os.path.isfile(input_path):
-            return [input_path]
-        raise FileNotFoundError(f"Input not found: {input_path}")
-
-    # ------------------------------------------------------------------
-    def resolve_output_dir(self, input_path, output_dir=None):
+    def resolve_output_dir(self, image_path, output_dir=None):
         '''
-        output_dir, or <input folder>/demosaiced_rgb_cv2_<algorithm>. Never the input folder.
+        output_dir, or <folder of the image>/demosaiced_rgb_cv2_<algorithm>. Never the input folder.
         '''
-        input_dir = input_path if os.path.isdir(input_path) else os.path.dirname(input_path)
+        input_dir = os.path.dirname(os.path.abspath(image_path))
         output_dir = output_dir or os.path.join(input_dir,
                                                 f"{config.DEMOSAIC_DIR_PREFIX}{self.algorithm}")
-        if os.path.abspath(output_dir) == os.path.abspath(input_dir):
+        if os.path.abspath(output_dir) == input_dir:
             raise ValueError("Output folder must differ from the input folder "
-                             "(would overwrite the sources)")
+                             "(would overwrite the source)")
         return output_dir
 
     # ------------------------------------------------------------------
-    def process(self, input_path, output_dir=None):
+    def process(self, image_path, output_dir=None):
         '''
-        Demosaics one Bayer TIFF, or every TIFF in a folder. Returns the output paths.
+        Demosaics one Bayer TIFF. Returns the output path.
         '''
-        images = self.list_images(input_path)
-        if not images:
-            raise FileNotFoundError(f"No TIFF images in {input_path}")
-        output_dir = self.resolve_output_dir(input_path, output_dir)
+        if not os.path.isfile(image_path):
+            raise FileNotFoundError(f"Input TIFF not found: {image_path}")
+        output_dir = self.resolve_output_dir(image_path, output_dir)
         os.makedirs(output_dir, exist_ok=True)
-        logger.info("%d image(s) from %s -> %s", len(images), input_path, output_dir)
-
-        outputs, failed = [], []
-        for image_path in images:
-            try:
-                outputs.append(self.process_image(image_path, output_dir))
-            except (ValueError, OSError) as e:
-                failed.append(image_path)
-                logger.error("%s", e)
-        if failed:
-            logger.error("%d of %d image(s) failed", len(failed), len(images))
-        return outputs
+        return self.process_image(image_path, output_dir)
 
 def main():
-    p = argparse.ArgumentParser(description="Demosaic Bayer TIFFs -> RGB TIFFs with OpenCV")
-    p.add_argument("--payload", default=PAYLOAD, type=str.upper,
-                   choices=list(config.SATELLITE_CONFIG_BY_NAME))
-    p.add_argument("--input", default=INPUT_FOLDER, help="One Bayer TIFF or a folder of them")
-    p.add_argument("--output", default=OUTPUT_FOLDER,
-                   help=f"Output folder. Default: <input>/{config.DEMOSAIC_DIR_PREFIX}<algorithm>")
-    p.add_argument("--algorithm", default=config.DEMOSAIC_ALGORITHM,
-                   choices=list(config.DEMOSAIC_CV2_CODES),
-                   help="ea = edge-aware, bilinear = plain bilinear")
-    p.add_argument("--pattern", default=None, type=str.upper, choices=config.BAYER_PATTERNS,
-                   help="Bayer pattern instead of the one in config.py")
-    p.add_argument("--float-scale", type=float, default=config.DEMOSAIC_FLOAT_SCALE,
-                   help="Multiplier for float input before converting to uint16. "
-                        "Default: 65535 if max <= 1.0, otherwise 1.0")
-    p.add_argument("--border-fix", action="store_true", default=config.DEMOSAIC_BORDER_FIX,
-                   help=f"Replicate inner pixels into the outer {config.DEMOSAIC_BORDER_PX}-pixel "
-                        "ring (only if you see bad pixels at the image edges)")
-    args = p.parse_args()
+    payload = input(f"Payload {list(config.SATELLITE_CONFIG_BY_NAME)}: ").strip().upper()
+    demosaic = Demosaic(payload)
 
-    demosaic = Demosaic(args.payload, algorithm=args.algorithm, pattern=args.pattern,
-                        float_scale=args.float_scale, border_fix=args.border_fix)
-    output_dir = demosaic.resolve_output_dir(args.input, args.output)
+    image_path = os.path.abspath(os.path.expanduser(input("Input Bayer TIFF: ").strip().strip("'\"")))
+    if not os.path.isfile(image_path):
+        raise FileNotFoundError(f"Input TIFF not found: {image_path}")
+    output_dir = demosaic.resolve_output_dir(image_path)
 
     os.makedirs(output_dir, exist_ok=True)
     file_log = logging.FileHandler(os.path.join(output_dir, "demosaic.log"))
@@ -223,7 +179,7 @@ def main():
 
     t0 = time.time()
     try:
-        outputs = demosaic.process(args.input, output_dir=output_dir)
+        output_path = demosaic.process(image_path, output_dir=output_dir)
     except KeyboardInterrupt:
         logger.warning("Stopped by user")
         raise SystemExit(130)
@@ -232,8 +188,7 @@ def main():
         "satellite_name"    : demosaic.satellite_name,
         "algorithm"         : demosaic.algorithm,
         "bayer_pattern"     : demosaic.pattern,
-        "output_dir"        : output_dir,
-        "images"            : len(outputs),
+        "output"            : output_path,
         "seconds"           : round(time.time() - t0, 1),
     }
     logger.info("Demosaicing complete: %s", json.dumps(result, indent=2))

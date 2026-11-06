@@ -10,8 +10,8 @@ held in RAM.
 
 Usage:
     python3 prnu_dsnu.py
-    -> asks for the payload and the input (one RGB TIFF or a folder of them)
-    -> writes to <input folder>/dsnu_prnu_<PAYLOAD>/
+    -> asks for the payload and the input RGB TIFF
+    -> writes to <folder of the TIFF>/dsnu_prnu_<PAYLOAD>/
 '''
 
 import os
@@ -87,11 +87,19 @@ def image_window(shape, sat_config):
 
 def dsnu(raw, dark):
     '''
-    DN_dsnu = max(0, DN - Dark), all bands of one block.
+    DN_dsnu = max(0, DN - Dark), all bands of one block, computed in float32
+    (a uint16 subtraction would wrap around wherever DN < Dark).
     '''
     out = np.subtract(raw, dark, dtype=np.float32)
     np.maximum(out, 0, out=out)
     return out
+
+
+def to_uint16(dn):
+    '''
+    Rounds a float DN block and clips it to [0, 65535] for saving as uint16.
+    '''
+    return np.clip(np.rint(dn), 0, np.iinfo(np.uint16).max).astype(np.uint16)
 
 
 def prnu(dn_dsnu, offset, gain, sat_config):
@@ -137,7 +145,7 @@ def correct_image(image_path, output_dir, dark, offset, gain, sat_config):
                                  f"do not match the image window {(h, w)}")
 
         dsnu_out = tifffile.memmap(os.path.join(output_dir, f"{name}_DSNU.tif"),
-                                   shape=(h, w, 3), dtype=np.float32, photometric="rgb")
+                                   shape=(h, w, 3), dtype=np.uint16, photometric="rgb")
         prnu_out = tifffile.memmap(os.path.join(output_dir, f"{name}_PRNU.tif"),
                                    shape=(h, w, 3), dtype=config.OUTPUT_DTYPE, photometric="rgb")
 
@@ -149,7 +157,7 @@ def correct_image(image_path, output_dir, dark, offset, gain, sat_config):
             dark_block = dark.read(row0 + b0, row0 + b1)[:, col0:col0 + w]
 
             dn_dsnu = dsnu(raw, dark_block)
-            dsnu_out[b0:b1] = dn_dsnu
+            dsnu_out[b0:b1] = to_uint16(dn_dsnu)
 
             offset_block = {band: offset[band].read(b0, b1) for band in config.BANDS}
             gain_block = {band: gain[band].read(b0, b1) for band in config.BANDS}
@@ -174,20 +182,11 @@ def main():
     payload = input(f"Payload {list(config.SATELLITE_CONFIG_BY_NAME)}: ").strip().upper()
     sat_config = config.get_config_by_satellite_name(payload)
 
-    input_path = os.path.abspath(os.path.expanduser(input("Input RGB TIFF or folder: ").strip().strip("'\"")))
-    if os.path.isdir(input_path):
-        input_dir = input_path
-        images = sorted(os.path.join(input_dir, f) for f in os.listdir(input_dir)
-                        if f.lower().endswith(config.TIFF_EXT))
-    elif os.path.isfile(input_path):
-        input_dir = os.path.dirname(input_path)
-        images = [input_path]
-    else:
-        raise FileNotFoundError(f"Input not found: {input_path}")
-    if not images:
-        raise FileNotFoundError(f"No TIFF images in {input_path}")
+    image_path = os.path.abspath(os.path.expanduser(input("Input RGB TIFF: ").strip().strip("'\"")))
+    if not os.path.isfile(image_path):
+        raise FileNotFoundError(f"Input TIFF not found: {image_path}")
 
-    output_dir = os.path.join(input_dir, f"dsnu_prnu_{payload}")
+    output_dir = os.path.join(os.path.dirname(image_path), f"dsnu_prnu_{payload}")
     os.makedirs(output_dir, exist_ok=True)
 
     # log to the console and to <output_dir>/prnu_dsnu.log
@@ -206,17 +205,15 @@ def main():
         logger.info("Band %s: offset %s, gain %s, saturation radiance %s %s", band,
                     sat_config["offset_path"][band], sat_config["gain_path"][band],
                     sat_config["saturation_radiance"][band], config.RADIANCE_UNIT)
-    logger.info("%d image(s) from %s -> %s, %d rows per block", len(images), input_path,
-                output_dir, config.BLOCK_ROWS)
+    logger.info("%s -> %s, %d rows per block", image_path, output_dir, config.BLOCK_ROWS)
 
     t0 = time.time()
     dark = TiffBlockReader(sat_config["dark_frame_path"])
     offset = {band: TiffBlockReader(sat_config["offset_path"][band]) for band in config.BANDS}
     gain = {band: TiffBlockReader(sat_config["gain_path"][band]) for band in config.BANDS}
     try:
-        for image_path in images:
-            correct_image(image_path, output_dir, dark, offset, gain, sat_config)
-        logger.info("All done: %d image(s) in %.1fs", len(images), time.time() - t0)
+        correct_image(image_path, output_dir, dark, offset, gain, sat_config)
+        logger.info("All done in %.1fs", time.time() - t0)
     finally:
         for reader in [dark, *offset.values(), *gain.values()]:
             reader.close()
